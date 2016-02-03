@@ -26,6 +26,90 @@
              */
             this.moves = 0;
 
+            // start of first change
+            /**
+             * open IndexedDB
+             * @type {IDBDatabase}
+             */
+            this.db = null;
+
+            /**
+             * store key for IndexedDB
+             * @type {String}
+             */
+            this.storekey = null;
+
+            /**
+             * Tries to restore game, once database has been opened
+             */
+            this.restore2 = function(scope) {
+                var transaction = this.db.transaction('SlidingPuzzleStore');
+                var objectStore = transaction.objectStore('SlidingPuzzleStore');
+                var self = this;
+                var request = objectStore.get(this.storekey);
+                request.onerror = function(event) {
+                    console.log('SlidingPuzzle: error reading from database, ' + request.error.name);
+                    scope.$apply(function() { self.shuffle(); });
+                };
+                request.onsuccess = function(event) {
+                    if (!request.result) {
+                        console.log('SlidingPuzzle: no saved game for ' + self.storekey);
+                        scope.$apply(function() { self.shuffle(); });
+                    }
+                    else {
+                        scope.$apply(function() { self.grid = request.result; });
+                    }
+                };
+            }
+
+            /**
+             * Tries to restore game
+             */
+            this.restore = function(scope, storekey) {
+                this.storekey = storekey;
+                if (this.db) {
+                    this.restore2(scope);
+                }
+                else if (!window.indexedDB) {
+                    console.log('SlidingPuzzle: browser does not support indexedDB');
+                    this.shuffle();
+                }
+                else {
+                    var self = this;
+                    var request = window.indexedDB.open('SlidingPuzzleDatabase');
+                    request.onerror = function(event) {
+                        console.log('SlidingPuzzle: error opening database, ' + request.error.name);
+                        scope.$apply(function() { self.shuffle(); });
+                    };
+                    request.onupgradeneeded = function(event) {
+                        event.target.result.createObjectStore('SlidingPuzzleStore');
+                    };
+                    request.onsuccess = function(event) {
+                        self.db = event.target.result;
+                        self.restore2(scope);
+                    };
+                }
+            };
+
+            /**
+             * Tries to save game
+             */
+            this.save = function() {
+                if (!this.db) {
+                    return;
+                }
+                var transaction = this.db.transaction('SlidingPuzzleStore', 'readwrite');
+                var objectStore = transaction.objectStore('SlidingPuzzleStore');
+                var request = objectStore.put(this.grid, this.storekey);
+                request.onerror = function(event) {
+                    console.log('SlidingPuzzle: error writing to database, ' + request.error.name);
+                };
+                request.onsuccess = function(event) {
+                    // successful, no further action needed
+                };
+            }
+            // end of first change
+
             /**
              * Moves tile
              * @param srow
@@ -45,6 +129,7 @@
                         this.moves++;
                     }
                 }
+                this.save(); // second change
             };
 
             /**
@@ -60,6 +145,7 @@
                     this.grid[row][col] = tiles.shift();
                 });
                 this.moves = 0;
+                this.save(); // third change
             };
 
             /**
@@ -76,6 +162,7 @@
                 this.traverse(function(tile, row, col) {
                     this.grid[row][col] = tiles.shift();
                 });
+                this.save(); // fourth change
             };
 
             /**
@@ -175,7 +262,14 @@
                         };
                     });
 
-                    scope.puzzle.shuffle();
+                    // start of fifth change
+                    if (attrs.api) {
+                        scope.puzzle.shuffle();
+                    }
+                    else {
+                        scope.puzzle.restore(scope, 'Basic');
+                    }
+                    // end of fifth change
                 }
 
                 attrs.$observe('size', function(size) {
